@@ -3,13 +3,13 @@
 
 import torch
 import torch.nn as nn
-from .vgg11 import VGG11Encoder
+from .vgg11 import VGG11Encoder, VGG11
 from .layers import CustomDropout
 
 class VGG11Classifier(nn.Module):
     """Full classifier = VGG11Encoder + ClassificationHead."""
 
-    def __init__(self, num_classes: int = 37, in_channels: int = 3, dropout_p: float = 0.5):
+    def __init__(self, num_classes: int = 37, in_channels: int = 3, dropout_p: float = 0.5, use_bn=True):
         """
         Initialize the VGG11Classifier model.
         Args:
@@ -19,7 +19,7 @@ class VGG11Classifier(nn.Module):
         """
         super().__init__()
         # Instantiate backbone encoder
-        self.encoder = VGG11Encoder(in_channels=in_channels)
+        self.encoder = VGG11(in_channels=in_channels, use_bn=use_bn)
         
         # Define the classification head
         # We use AdaptiveAvgPool2d to ensure the flattened size is always 25088

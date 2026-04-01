@@ -102,23 +102,33 @@ class OxfordIIITPetDataset(Dataset):
         root   = tree.getroot()
         obj    = root.find("object")
         if obj is None:
-            return [0.5, 0.5, 1.0, 1.0]
+            return [112.0, 112.0, 224.0, 224.0]
         bndbox = obj.find("bndbox")
         if bndbox is None:
-            return [0.5, 0.5, 1.0, 1.0]
-        xmin = float(bndbox.find("xmin").text) / img_w
-        ymin = float(bndbox.find("ymin").text) / img_h
-        xmax = float(bndbox.find("xmax").text) / img_w
-        ymax = float(bndbox.find("ymax").text) / img_h
+            return [112.0, 112.0, 224.0, 224.0]
+        
+        # Get raw pixel coords from XML
+        xmin = float(bndbox.find("xmin").text) 
+        ymin = float(bndbox.find("ymin").text) 
+        xmax = float(bndbox.find("xmax").text)
+        ymax = float(bndbox.find("ymax").text) 
+        
+        # Scale to 224×224 target size
+        xmin = xmin / img_w * 224.0
+        ymin = ymin / img_h * 224.0
+        xmax = xmax / img_w * 224.0
+        ymax = ymax / img_h * 224.0
+        
+        # Convert to (cx, cy, w, h) in pixel space
         cx = (xmin + xmax) / 2
         cy = (ymin + ymax) / 2
         bw =  xmax - xmin
         bh =  ymax - ymin
         return [
-            float(np.clip(cx, 0, 1)),
-            float(np.clip(cy, 0, 1)),
-            float(np.clip(bw, 0, 1)),
-            float(np.clip(bh, 0, 1)),
+            float(np.clip(cx, 0, 224)),
+            float(np.clip(cy, 0, 224)),
+            float(np.clip(bw, 0, 224)),
+            float(np.clip(bh, 0, 224)),
         ]
 
     def __getitem__(self, idx) -> dict:
@@ -140,13 +150,19 @@ class OxfordIIITPetDataset(Dataset):
         xml_path = os.path.join(self.xmls_dir, f"{img_name}.xml")
         bbox_yolo = (self._parse_xml(xml_path, img_w, img_h)
                  if os.path.exists(xml_path)
-                 else [0.5, 0.5, 1.0, 1.0])
+                 else [112.0, 112.0, 224.0, 224.0])
         
-        # Albumentations
+        # Albumentations - needs normalized YOLO internally
+        bbox_normalized = [
+        bbox_yolo[0] / 224.0,
+        bbox_yolo[1] / 224.0,
+        bbox_yolo[2] / 224.0,
+        bbox_yolo[3] / 224.0,
+        ]
         augmented = self.transform(
             image=image,
             mask=mask,
-            bboxes=[bbox_yolo],
+            bboxes=[bbox_normalized],
             class_labels=[class_id],
         )
 
@@ -154,10 +170,17 @@ class OxfordIIITPetDataset(Dataset):
         mask   = augmented["mask"].long()                       
         bboxes = augmented["bboxes"]
         
-        # Handle edge case where bbox is clipped out entirely
-        bbox = (torch.tensor(bboxes[0], dtype=torch.float32)
-            if len(bboxes) > 0
-            else torch.tensor([0.5, 0.5, 1.0, 1.0], dtype=torch.float32))
+        # After augmentation, convert albumentations normalized output → pixels
+        if len(bboxes) > 0:
+            cx_n, cy_n, w_n, h_n = bboxes[0]
+            bbox = torch.tensor([
+                cx_n * 224.0,
+                cy_n * 224.0,
+                w_n  * 224.0,
+                h_n  * 224.0,
+            ], dtype=torch.float32)
+        else:
+            bbox = torch.tensor([112.0, 112.0, 224.0, 224.0], dtype=torch.float32)
             
         return {
             "image": image,

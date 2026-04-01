@@ -4,8 +4,6 @@
 import argparse
 import os
 import time
-import copy
-from typing import Dict, Tuple, List, Union
 
 import numpy as np
 import torch
@@ -17,10 +15,10 @@ import wandb
 # ── Local Imports ──────────────────────────────────────────────────────────────
 from data.pets_dataset import ( OxfordIIITPetDataset, get_train_transforms, get_val_transforms)
 from models.classification import VGG11Classifier
-from models.localization    import VGG11Localizer
-from models.segmentation    import VGG11UNet
-from models.multitask       import MultiTaskPerceptionModel
-from losses.iou_loss         import IoULoss
+from models.localization import VGG11Localizer
+from models.segmentation import VGG11UNet
+from multitask import MultiTaskPerceptionModel
+from losses.iou_loss import IoULoss
 
 # 1. UTILITIES & CONFIGURATION
 
@@ -63,7 +61,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--wandb_entity", type=str, default=None)
     p.add_argument("--run_name", type=str, default=None)
     p.add_argument("--log_activation_hist", action="store_true", help="For Section 2.1")
-
+    p.add_argument("--use_bn", type=lambda x: x.lower() != "false", default=True, help="Section 2.1: toggle BatchNorm")
     return p.parse_args()
 
 # 2. MODEL BUILDING & WEIGHT INITIALIZATION
@@ -115,20 +113,13 @@ def build_model(args: argparse.Namespace, device: torch.device) -> nn.Module:
 
     elif args.task == "multitask":
         model = MultiTaskPerceptionModel(
-            num_breeds=args.num_classes, 
+            num_breeds=args.num_classes,
             seg_classes=args.seg_classes,
-            dropout_p=args.dropout_p, 
-            freeze_encoder=(args.freeze_encoder == "full")
+            classifier_path=args.cls_ckpt or "checkpoints/classifier.pth",
+            localizer_path=args.loc_ckpt  or "checkpoints/localizer.pth",
+            unet_path=args.seg_ckpt       or "checkpoints/unet.pth",
         )
-        # Load task-specific weights into the multitask heads
-        if args.cls_ckpt: _load_state(model.encoder, args.cls_ckpt, device)
-        if args.loc_ckpt:
-            sd = torch.load(args.loc_ckpt, map_location=device).get("state_dict")
-            model.bbox_head.load_state_dict({k.replace("regression_head.", ""): v for k, v in sd.items() if "regression_head" in k}, strict=False)
-        if args.seg_ckpt:
-            sd = torch.load(args.seg_ckpt, map_location=device).get("state_dict")
-            model.load_state_dict({k: v for k, v in sd.items() if not k.startswith("encoder.")}, strict=False)
-
+        
     model.to(device)
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"    Trainable parameters: {trainable:,}")
@@ -161,6 +152,8 @@ def compute_dice(pred_mask: torch.Tensor, true_mask: torch.Tensor, num_classes: 
         dice_scores.append((2 * intersection + eps) / (p.sum() + t.sum() + eps))
     return float(torch.stack(dice_scores).mean())
 
+
+    
 # 4. TRAINING & VALIDATION ENGINES
 
 def train_epoch(model, loader, optimizer, cls_crit, loc_crit, seg_crit, args, device, epoch) -> dict:
@@ -176,17 +169,21 @@ def train_epoch(model, loader, optimizer, cls_crit, loc_crit, seg_crit, args, de
             loss = cls_crit(model(img), lbl)
             c_l += loss.item()
         elif task == "localization":
-            loss = loc_crit(model(img), box)
+            pred_box = model(img)
+            mse_loss = nn.MSELoss()(pred_box, box)
+            iou_loss = loc_crit(pred_box, box)
+            loss = mse_loss + iou_loss
             l_l += loss.item()
         elif task == "segmentation":
             loss = seg_crit(model(img), msk)
             s_l += loss.item()
         elif task == "multitask":
             out = model(img)
-            lc, ll, ls = cls_crit(out["classification"], lbl), loc_crit(out["localization"], box), seg_crit(out["segmentation"], msk)
+            lc = cls_crit(out["classification"], lbl)
+            ll = nn.MSELoss()(out["localization"], box) + loc_crit(out["localization"], box)
+            ls = seg_crit(out["segmentation"], msk)
             loss = (args.w_cls * lc) + (args.w_loc * ll) + (args.w_seg * ls)
             c_l, l_l, s_l = c_l + lc.item(), l_l + ll.item(), s_l + ls.item()
-
         loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), 5.0)
         optimizer.step()
@@ -205,7 +202,8 @@ def val_epoch(model, loader, cls_crit, loc_crit, seg_crit, args, device, epoch) 
     model.eval()
     total_l, all_lbl, all_prd, ious, dices, accs = 0.0, [], [], [], [], []
     seg_samples = []
-
+    bbox_records = []
+    
     with torch.no_grad():
         for batch in loader:
             img, lbl, box, msk = batch["image"].to(device), batch["label"].to(device), batch["bbox"].to(device), batch["mask"].to(device)
@@ -218,16 +216,38 @@ def val_epoch(model, loader, cls_crit, loc_crit, seg_crit, args, device, epoch) 
                 out = model(img)
                 total_l += loc_crit(out, box).item()
                 ious.extend(compute_iou_batch(out, box).cpu().tolist())
+                
+                if len(bbox_records) < 15:
+                    for i in range(len(img)):
+                        if len(bbox_records) >= 15: break
+                        bbox_records.append({
+                            "image":    img[i].cpu(),
+                            "gt_box":   box[i].cpu().numpy(),
+                            "pred_box": out[i].cpu().numpy(),
+                            "iou": float(compute_iou_batch( out[i:i+1], box[i:i+1]).item())
+                        })
+                        
             elif args.task == "segmentation":
                 out = model(img)
                 total_l += seg_crit(out, msk).item()
                 dices.append(compute_dice(out, msk)); accs.append((out.argmax(1) == msk).float().mean().item())
                 if len(seg_samples) < 5: seg_samples.append({"image": img[0].cpu(), "gt_mask": msk[0].cpu(), "pred_mask": out[0].argmax(0).cpu()})
+            
             elif args.task == "multitask":
                 out = model(img)
                 total_l += (args.w_cls * cls_crit(out["classification"], lbl) + args.w_loc * loc_crit(out["localization"], box) + args.w_seg * seg_crit(out["segmentation"], msk)).item()
                 all_prd.extend(out["classification"].argmax(1).cpu().tolist()); all_lbl.extend(lbl.cpu().tolist())
                 ious.extend(compute_iou_batch(out["localization"], box).cpu().tolist())
+                if len(bbox_records) < 15:
+                    for i in range(len(img)):
+                        if len(bbox_records) >= 15: break
+                        bbox_records.append({
+                            "image": img[i].cpu(),
+                            "gt_box": box[i].cpu().numpy(),
+                            "pred_box": out["localization"][i].cpu().numpy(),
+                            "iou": float(compute_iou_batch( out["localization"][i:i+1], box[i:i+1]).item())
+                        })
+                        
                 dices.append(compute_dice(out["segmentation"], msk)); accs.append((out["segmentation"].argmax(1) == msk).float().mean().item())
                 if len(seg_samples) < 5: seg_samples.append({"image": img[0].cpu(), "gt_mask": msk[0].cpu(), "pred_mask": out["segmentation"][0].argmax(0).cpu()})
 
@@ -238,6 +258,8 @@ def val_epoch(model, loader, cls_crit, loc_crit, seg_crit, args, device, epoch) 
     
     # Section 2.6 Visuals
     if seg_samples and (epoch % 5 == 0 or epoch == 1): _log_seg_samples(seg_samples, epoch)
+    
+    if bbox_records and (epoch == 1 or epoch % 10 == 0): _log_bbox_table(bbox_records, epoch)
     return res
 
 
@@ -265,8 +287,66 @@ def _log_seg_samples(samples: list, epoch: int):
         row = np.concatenate([_denorm_image(s["image"]), _SEG_PALETTE[np.clip(s["gt_mask"].numpy(), 0, 2)], _SEG_PALETTE[np.clip(s["pred_mask"].numpy(), 0, 2)]], axis=1)
         wb_imgs.append(wandb.Image(row, caption=f"Epoch {epoch} | Orig | GT | Pred"))
     wandb.log({"seg/sample_predictions": wb_imgs}, commit=False)
+    
+def log_feature_maps(model: nn.Module, loader, device):
+    """Section 2.4 — first conv vs last conv feature maps."""
+    first_hook = ActivationHook()
+    last_hook  = ActivationHook()
+    encoder = getattr(model, "encoder", model)
+    first_hook.register(encoder.block1[0])   # 1st conv — edges
+    last_hook.register(encoder.block5[3])    # last conv before pool5
+
+    model.eval()
+    batch = next(iter(loader))
+    with torch.no_grad():
+        model(batch["image"].to(device))
+    first_hook.remove(); last_hook.remove()
+
+    def _grid(act, n=16):
+        maps = act[0, :n].numpy()
+        maps = [(m - m.min()) / (m.max() - m.min() + 1e-8) for m in maps]
+        rows = [np.concatenate(maps[i:i+4], axis=1) for i in range(0, n, 4)]
+        return (np.concatenate(rows, axis=0) * 255).astype(np.uint8)
+
+    imgs = []
+    if first_hook.activation is not None:
+        imgs.append(wandb.Image(_grid(first_hook.activation),
+                    caption="Block1 Conv1 — low-level edges"))
+    if last_hook.activation is not None:
+        imgs.append(wandb.Image(_grid(last_hook.activation),
+                    caption="Block5 last Conv — semantic features"))
+    if imgs:
+        wandb.log({"features/feature_maps": imgs})
+
+def _draw_box_pixels(img, box, color, thickness=2):
+    """Draw pixel-space (cx,cy,w,h) box on image in-place."""
+    cx, cy, bw, bh = box
+    x1, y1 = int(cx - bw/2), int(cy - bh/2)
+    x2, y2 = int(cx + bw/2), int(cy + bh/2)
+    H, W = img.shape[:2]
+    x1, y1 = max(0, x1), max(0, y1)
+    x2, y2 = min(W-1, x2), min(H-1, y2)
+    img[y1:y1+thickness, x1:x2] = color
+    img[y2:y2+thickness, x1:x2] = color
+    img[y1:y2, x1:x1+thickness] = color
+    img[y1:y2, x2:x2+thickness] = color
 
 
+def _log_bbox_table(records: list, epoch: int):
+    """Section 2.5 — W&B table with GT/pred boxes and IoU."""
+    table = wandb.Table(columns=["image", "gt_box", "pred_box", "iou"])
+    for r in records:
+        vis = _denorm_image(r["image"]).copy()
+        _draw_box_pixels(vis, r["gt_box"],   (0, 255, 0))   # green GT
+        _draw_box_pixels(vis, r["pred_box"], (255, 0, 0))   # red pred
+        table.add_data(
+            wandb.Image(vis),
+            str(r["gt_box"].tolist()),
+            str(r["pred_box"].tolist()),
+            round(r["iou"], 4)
+        )
+    wandb.log({f"detection/bbox_table_ep{epoch}": table}, commit=False)
+    
 # 6. MAIN EXECUTION
 
 def main():
@@ -282,6 +362,13 @@ def main():
 
     best_m, m_key = 0.0, {"classification": "val/macro_f1", "localization": "val/mean_iou", "segmentation": "val/dice_score", "multitask": "val/dice_score"}[args.task]
 
+    _CKPT_NAMES = {
+            "classification": "classifier.pth",
+            "localization":   "localizer.pth",
+            "segmentation":   "unet.pth",
+            "multitask":      "multitask.pth",
+        }
+    
     for epoch in range(1, args.epochs + 1):
         print(f"\nEpoch {epoch}/{args.epochs}")
         start = time.time()
@@ -292,7 +379,8 @@ def main():
 
         # Section 2.1 Logging
         if args.log_activation_hist:
-            h = ActivationHook(); h.register(getattr(model, "encoder", model).block2[0])
+            h = ActivationHook()
+            h.register(getattr(model, "encoder", model).block3[0])
             model.eval(); model(next(iter(val_loader))["image"].to(device)); h.remove()
             wandb.log({"activations/block2_conv_hist": wandb.Histogram(h.activation.flatten().numpy())}, commit=False)
 
@@ -303,8 +391,10 @@ def main():
         if v_metrics.get(m_key, 0.0) > best_m:
             best_m = v_metrics[m_key]
             os.makedirs(args.ckpt_dir, exist_ok=True)
-            torch.save({"state_dict": model.state_dict(), "best_metric": best_m}, os.path.join(args.ckpt_dir, f"{args.task}.pth"))
+            
+            torch.save({"state_dict": model.state_dict(), "best_metric": best_m}, os.path.join(args.ckpt_dir, _CKPT_NAMES[args.task]))
 
+    if args.task in ("classification", "multitask"):log_feature_maps(model, val_loader, device)
     wandb.finish()
 
 if __name__ == "__main__":

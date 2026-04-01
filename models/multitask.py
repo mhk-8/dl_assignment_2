@@ -1,15 +1,15 @@
 """Unified multi-task model
 """
-
+import os
 import torch
 import torch.nn as nn
-from .vgg11 import VGG11Encoder
-from .layers import CustomDropout, conv_block
+from models.vgg11 import VGG11Encoder, VGG11
+from models.layers import CustomDropout, conv_block
 
 class MultiTaskPerceptionModel(nn.Module):
     """Shared-backbone multi-task model."""
 
-    def __init__(self, num_breeds: int = 37, seg_classes: int = 3, in_channels: int = 3,classifier_path: str = "classifier.pth", localizer_path: str = "localizer.pth", unet_path: str = "unet.pth", dropout_p: float = 0.5, freeze_encoder: bool = False):
+    def __init__(self, num_breeds: int = 37, seg_classes: int = 3, in_channels: int = 3, classifier_path:str = "checkpoints/classifier.pth", localizer_path:str = "checkpoints/localizer.pth", unet_path:str = "checkpoints/unet.pth"):
         """
         Initialize the shared backbone/heads using these trained weights.
         Args:
@@ -22,10 +22,7 @@ class MultiTaskPerceptionModel(nn.Module):
         """
         super().__init__()
         # Shared Backbone
-        self.encoder = VGG11Encoder(in_channels=in_channels)
-        if freeze_encoder:
-            for param in self.encoder.parameters():
-                param.requires_grad = False
+        self.encoder = VGG11(in_channels=in_channels)
                 
         # Classification Head
         self.cls_head = nn.Sequential(
@@ -33,10 +30,10 @@ class MultiTaskPerceptionModel(nn.Module):
             nn.Flatten(),
             nn.Linear(512 * 7 * 7, 4096),
             nn.ReLU(inplace=True),
-            CustomDropout(p=dropout_p), # Regularization effect to be analyzed in W&B 
+            CustomDropout(p=0.5), # Regularization effect to be analyzed in W&B 
             nn.Linear(4096, 4096),
             nn.ReLU(inplace=True),
-            CustomDropout(p=dropout_p),
+            CustomDropout(p=0.5),
             nn.Linear(4096, num_breeds)
         )
 
@@ -49,23 +46,65 @@ class MultiTaskPerceptionModel(nn.Module):
             nn.Linear(4096, 512),
             nn.ReLU(inplace=True),
             nn.Linear(512, 4),
-            nn.Sigmoid() # Constrains to normalized coordinate space 
+            
         )
 
         # Segmentation Decoder (from Task 3)
         # We reuse the logic from VGG11UNet expansive path
         self.up5 = nn.ConvTranspose2d(512, 512, kernel_size=2, stride=2)
-        self.dec5 = self._conv_block(1024, 512)
+        self.dec5 = conv_block(1024, 512)
         self.up4 = nn.ConvTranspose2d(512, 256, kernel_size=2, stride=2)
-        self.dec4 = self._conv_block(512, 256)
+        self.dec4 = conv_block(512, 256)
         self.up3 = nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2)
-        self.dec3 = self._conv_block(256, 128)
+        self.dec3 = conv_block(256, 128)
         self.up2 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
-        self.dec2 = self._conv_block(128, 64)
+        self.dec2 = conv_block(128, 64)
         self.up1 = nn.ConvTranspose2d(64, 32, kernel_size=2, stride=2)
-        self.dec1 = self._conv_block(32, 32)
+        self.dec1 = conv_block(32, 32)
         self.final_seg = nn.Conv2d(32, seg_classes, kernel_size=1)
         
+        #load pretrained weights
+        device = torch.device("cpu")
+        self._load_classifier(classifier_path, device)
+        self._load_localizer(localizer_path,   device)
+        self._load_unet(unet_path,             device)
+    
+    #  Weight loading helpers
+
+    def _get_sd(self, path: str, device):
+        """Load state dict from path if it exists."""
+        if not os.path.exists(path):
+            print(f"  Warning: checkpoint not found: {path}")
+            return None
+        payload = torch.load(path, map_location=device)
+        return payload.get("state_dict", payload)
+
+    def _load_classifier(self, path: str, device):
+        sd = self._get_sd(path, device)
+        if sd is None:
+            return
+        enc_sd = {k.replace("encoder.", ""): v
+                  for k, v in sd.items() if k.startswith("encoder.")}
+        cls_sd = {k.replace("classifier.", ""): v
+                  for k, v in sd.items() if k.startswith("classifier.")}
+        self.encoder.load_state_dict(enc_sd, strict=False)
+        self.cls_head.load_state_dict(cls_sd, strict=False)
+
+    def _load_localizer(self, path: str, device):
+        sd = self._get_sd(path, device)
+        if sd is None:
+            return
+        bbox_sd = {k.replace("regression_head.", ""): v
+                   for k, v in sd.items() if "regression_head" in k}
+        self.bbox_head.load_state_dict(bbox_sd, strict=False)
+
+    def _load_unet(self, path: str, device):
+        sd = self._get_sd(path, device)
+        if sd is None:
+            return
+        dec_sd = {k: v for k, v in sd.items()
+                  if not k.startswith("encoder.")}
+        self.load_state_dict(dec_sd, strict=False)
         
     def forward(self, x: torch.Tensor):
         """Forward pass for multi-task model.
@@ -89,9 +128,9 @@ class MultiTaskPerceptionModel(nn.Module):
 
         # Segmentation 
         d5 = self.dec5(torch.cat([self.up5(bottleneck), skips["block4"]], dim=1))
-        d4 = self.dec4(torch.cat([self.up4(d5),         skips["block3"]], dim=1))
-        d3 = self.dec3(torch.cat([self.up3(d4),         skips["block2"]], dim=1))
-        d2 = self.dec2(torch.cat([self.up2(d3),         skips["block1"]], dim=1))
+        d4 = self.dec4(torch.cat([self.up4(d5), skips["block3"]], dim=1))
+        d3 = self.dec3(torch.cat([self.up3(d4), skips["block2"]], dim=1))
+        d2 = self.dec2(torch.cat([self.up2(d3), skips["block1"]], dim=1))
         d1 = self.dec1(self.up1(d2))
         seg_out = self.final_seg(d1)
 

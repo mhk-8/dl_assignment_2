@@ -18,8 +18,8 @@ class IoULoss(nn.Module):
         super().__init__()
         
         # Validating reduction
-        if reduction not in {"none", "mean", "sum"}:
-            raise ValueError(f"Reduction must be 'none', 'mean', or 'sum'. Got: {reduction}")
+        if reduction not in {"mean", "sum"}:
+            raise ValueError(f"Reduction must be 'mean', or 'sum'. Got: {reduction}")
         self.eps = eps
         self.reduction = reduction
         
@@ -29,7 +29,7 @@ class IoULoss(nn.Module):
         Args:
             pred_boxes: [B, 4] predicted boxes in (x_center, y_center, width, height) format.
             target_boxes: [B, 4] target boxes in (x_center, y_center, width, height) format."""
-        # TODO: implement IoU loss.
+       
         # Convert to corners (x1, y1, x2, y2)
         # Prediction corners
         p_x1 = pred_boxes[:, 0] - pred_boxes[:, 2] / 2
@@ -68,5 +68,4 @@ class IoULoss(nn.Module):
             return loss.mean()
         elif self.reduction == "sum":
             return loss.sum()
-        else: # "none"
-            return loss
+        

@@ -3,12 +3,12 @@
 
 import torch
 import torch.nn as nn
-from .vgg11 import VGG11Encoder
+from .vgg11 import VGG11Encoder, VGG11
 
 class VGG11Localizer(nn.Module):
     """VGG11-based localizer."""
-    # Outputs [xc, yc, w, h] in normalized [0, 1] space.
-    def __init__(self, in_channels: int = 3, dropout_p: float = 0.5, freeze_encoder: bool = False):
+    # Outputs [xc, yc, w, h] in pixel space (0-224).
+    def __init__(self, in_channels: int = 3, dropout_p: float = 0.5):
         """
         Initialize the VGG11Localizer model.
 
@@ -18,11 +18,8 @@ class VGG11Localizer(nn.Module):
         """
         super().__init__()
         # Reuse the VGG11 Encoder
-        self.encoder = VGG11Encoder(in_channels=in_channels)
-        # Optionally freeze encoder weights (feature extractor mode)
-        if freeze_encoder:
-            for param in self.encoder.parameters():
-                param.requires_grad = False
+        self.encoder = VGG11(in_channels=in_channels)
+        
                 
         # Regression Head
         self.regression_head = nn.Sequential(
@@ -39,8 +36,7 @@ class VGG11Localizer(nn.Module):
             
             # Output Layer: 4 coordinates [xc, yc, w, h]
             nn.Linear(512, 4),
-            # Sigmoid ensures output is strictly in [0, 1] range
-            nn.Sigmoid()
+            
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

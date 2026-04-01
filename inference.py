@@ -16,7 +16,7 @@ import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
 from data.pets_dataset import OxfordIIITPetDataset, get_val_transforms
-from models.multitask import MultiTaskPerceptionModel
+from multitask import MultiTaskPerceptionModel
 from models.classification import VGG11Classifier
 from models.localization import VGG11Localizer
 from models.segmentation import VGG11UNet
@@ -46,7 +46,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--wandb_project", type=str, default="da6401-assignment2")
     p.add_argument("--wandb_entity", type=str, default=None)
     p.add_argument("--mode", type=str, default="multitask", choices=["multitask", "classification", "localization", "segmentation"])
-
+    p.add_argument("--use_bn", type=lambda x: x.lower() != "false", default=True, help="Section 2.1: toggle BatchNorm")
     return p.parse_args()
 
 # 2. IMAGE PROCESSING HELPERS
@@ -66,12 +66,13 @@ def _mask_to_rgb(mask: torch.Tensor) -> np.ndarray:
     m = np.clip(mask.numpy().astype(np.int64), 0, 2)
     return _SEG_PALETTE[m]
 
-def _draw_box(img: np.ndarray, box: np.ndarray, color: tuple, W: int, H: int, thickness: int = 2):
-    """Draws normalized (cx, cy, w, h) boxes on an image in-place."""
+def _draw_box(img, box, color, thickness=2):
     cx, cy, bw, bh = box
-    x1, y1 = int((cx - bw/2) * W), int((cy - bh/2) * H)
-    x2, y2 = int((cx + bw/2) * W), int((cy + bh/2) * H)
-    x1, y1, x2, y2 = max(0, x1), max(0, y1), min(W-1, x2), min(H-1, y2)
+    x1, y1 = int(cx - bw/2), int(cy - bh/2)
+    x2, y2 = int(cx + bw/2), int(cy + bh/2)
+    H, W = img.shape[:2]
+    x1, y1 = max(0, x1), max(0, y1)
+    x2, y2 = min(W-1, x2), min(H-1, y2)
     img[y1:y1+thickness, x1:x2] = color
     img[y2:y2+thickness, x1:x2] = color
     img[y1:y2, x1:x1+thickness] = color
@@ -108,7 +109,7 @@ def build_eval_model(args: argparse.Namespace, device: torch.device) -> nn.Modul
     print(f"\nBuilding evaluation model: {args.mode}")
 
     if args.mode == "multitask":
-        model = MultiTaskPerceptionModel(num_breeds=args.num_classes, seg_classes=args.seg_classes, dropout_p=args.dropout_p)
+        model = MultiTaskPerceptionModel(num_breeds=args.num_classes, seg_classes=args.seg_classes, classifier_path=args.cls_ckpt, localizer_path=args.loc_ckpt, unet_path=args.seg_ckpt)
         # Unified loading logic
         for ckpt, module_attr in [(args.cls_ckpt, "cls_head"), (args.loc_ckpt, "bbox_head"), (args.seg_ckpt, None)]:
             if not os.path.exists(ckpt): continue
@@ -123,11 +124,20 @@ def build_eval_model(args: argparse.Namespace, device: torch.device) -> nn.Modul
             print(f"    Loaded components from {ckpt}")
     else:
         # Single-task loading logic
-        model_cls = {"classification": VGG11Classifier, "localization": VGG11Localizer, "segmentation": VGG11UNet}[args.mode]
-        model = model_cls(num_classes=args.num_classes if args.mode != "localization" else None)
-        ckpt_path = {"classification": args.cls_ckpt, "localization": args.loc_ckpt, "segmentation": args.seg_ckpt}[args.mode]
-        model.load_state_dict(torch.load(ckpt_path, map_location=device).get("state_dict", {}), strict=False)
-
+        #model_cls = {"classification": VGG11Classifier, "localization": VGG11Localizer, "segmentation": VGG11UNet}[args.mode]
+        if args.mode == "classification":
+            model = VGG11Classifier(num_classes=args.num_classes, dropout_p=args.dropout_p)
+        elif args.mode == "localization":
+            model = VGG11Localizer()
+        elif args.mode == "segmentation":
+            model = VGG11UNet(num_classes=args.seg_classes)
+        ckpt_path = {"classification": args.cls_ckpt,
+                    "localization":   args.loc_ckpt,
+                    "segmentation":   args.seg_ckpt}[args.mode]
+        model.load_state_dict(
+            torch.load(ckpt_path, map_location=device).get("state_dict", {}),
+            strict=False
+        )
     return model.to(device).eval()
 
 
@@ -198,7 +208,8 @@ def main():
         table = wandb.Table(columns=["image", "gt_box", "pred_box", "iou", "confidence"])
         for r in bbox_records:
             vis = copy.deepcopy(_denorm_image(r["image"]))
-            _draw_box(vis, r["gt_box"], (0, 255, 0), 224, 224); _draw_box(vis, r["pred_box"], (255, 0, 0), 224, 224)
+            _draw_box(vis, r["gt_box"], (0, 255, 0));
+            _draw_box(vis, r["pred_box"], (255, 0, 0))
             table.add_data(wandb.Image(vis), str(r["gt_box"].tolist()), str(r["pred_box"].tolist()), round(r["iou"], 4), round(1 - np.linalg.norm(r["pred_box"][:2] - r["gt_box"][:2]), 4))
         wandb.log({"test/bbox_table": table})
 

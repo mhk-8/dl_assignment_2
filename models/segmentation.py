@@ -3,14 +3,14 @@
 
 import torch
 import torch.nn as nn
-from .vgg11 import VGG11Encoder
+from .vgg11 import VGG11Encoder, VGG11
 from .layers import CustomDropout, conv_block
     
 class VGG11UNet(nn.Module):
     """U-Net style segmentation network.
     """
 
-    def __init__(self, num_classes: int = 3, in_channels: int = 3, dropout_p: float = 0.5):
+    def __init__(self, num_classes: int = 3, in_channels: int = 3):
         """
         Initialize the VGG11UNet model.
 
@@ -21,7 +21,7 @@ class VGG11UNet(nn.Module):
         """
         super().__init__()
         # Contracting path (encoder)
-        self.encoder = VGG11Encoder(in_channels=in_channels)
+        self.encoder = VGG11(in_channels=in_channels)
 
         # Expansive path (decoder) — mirrors encoder resolution stages
         # bottleneck p5: [B, 512,   7,   7]
