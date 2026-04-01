@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 from sklearn.metrics import f1_score
 import wandb
 
-# ── Local Imports ──────────────────────────────────────────────────────────────
+# Local Imports 
 from data.pets_dataset import ( OxfordIIITPetDataset, get_train_transforms, get_val_transforms)
 from models.classification import VGG11Classifier
 from models.localization import VGG11Localizer
@@ -98,7 +98,7 @@ def build_model(args: argparse.Namespace, device: torch.device) -> nn.Module:
     print(f"\nBuilding model for task: {args.task}")
 
     if args.task == "classification":
-        model = VGG11Classifier(num_classes=args.num_classes, dropout_p=args.dropout_p)
+        model = VGG11Classifier(num_classes=args.num_classes, dropout_p=args.dropout_p, use_bn=args.use_bn)
         if args.cls_ckpt: _load_state(model, args.cls_ckpt, device)
 
     elif args.task == "localization":
@@ -294,7 +294,9 @@ def log_feature_maps(model: nn.Module, loader, device):
     last_hook  = ActivationHook()
     encoder = getattr(model, "encoder", model)
     first_hook.register(encoder.block1[0])   # 1st conv — edges
-    last_hook.register(encoder.block5[3])    # last conv before pool5
+    # Find last Conv2d in block5 dynamically:
+    last_conv = [m for m in encoder.block5 if isinstance(m, nn.Conv2d)][-1]
+    last_hook.register(last_conv)
 
     model.eval()
     batch = next(iter(loader))
