@@ -94,11 +94,11 @@ class VGG11Encoder(nn.Module):
 
         if return_features:
             features = {
-                "block1": p1,  # [B,  64, 112, 112] ← post-pool to match up2 output
-                "block2": s2,  # [B, 128,  56,  56]
-                "block3": s3,  # [B, 256,  28,  28]
-                "block4": s4,  # [B, 512,  14,  14]
-                "block5": s5,  # [B, 512,  14,  14]
+                "block1": s2,  
+                "block2": s3,  
+                "block3": s4,  
+                "block4": s5,  
+                #"block5": s5,  
             }
             return p5, features
         

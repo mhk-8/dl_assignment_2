@@ -3,8 +3,8 @@
 import os
 import torch
 import torch.nn as nn
-from .vgg11 import VGG11Encoder, VGG11
-from .layers import CustomDropout, conv_block
+from models.vgg11 import VGG11Encoder, VGG11
+from models.layers import CustomDropout, conv_block
 
 class MultiTaskPerceptionModel(nn.Module):
     """Shared-backbone multi-task model."""

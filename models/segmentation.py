@@ -26,19 +26,19 @@ class VGG11UNet(nn.Module):
         # Expansive path (decoder) — mirrors encoder resolution stages
         # bottleneck p5: [B, 512,   7,   7]
         self.up5  = nn.ConvTranspose2d(512, 512, kernel_size=2, stride=2)
-        self.dec5 = conv_block(512 + 512, 512)   # up + block4 skip [B,512,14,14]
+        self.dec5 = conv_block(1024, 512)   # up + block4 skip [B,512,14,14]
 
         # [B, 512, 14, 14]
         self.up4  = nn.ConvTranspose2d(512, 256, kernel_size=2, stride=2)
-        self.dec4 = conv_block(256 + 256, 256)   # up + block3 skip [B,256,28,28]
+        self.dec4 = conv_block(256 + 512, 256)   # up + block3 skip [B,256,28,28]
 
         # [B, 256, 28, 28]
         self.up3  = nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2)
-        self.dec3 = conv_block(128 + 128, 128)   # up + block2 skip [B,128,56,56]
+        self.dec3 = conv_block(128 + 256, 128)   # up + block2 skip [B,128,56,56]
 
         # [B, 128, 56, 56]
         self.up2  = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
-        self.dec2 = conv_block(64 + 64, 64)      # up + block1 skip [B,64,112,112]
+        self.dec2 = conv_block(64 + 128, 64)      # up + block1 skip [B,64,112,112]
 
         # [B, 64, 112, 112] — final upsample to 224×224, no skip
         self.up1  = nn.ConvTranspose2d(64, 32, kernel_size=2, stride=2)
