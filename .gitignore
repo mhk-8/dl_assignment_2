@@ -1,0 +1,16 @@
+# Never push checkpoint files to GitHub
+checkpoints/*.pth
+
+# Never push wandb logs
+wandb/
+
+# VS Code settings
+.vscode/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Data files
+*.zip
+*.tar.gz
