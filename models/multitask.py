@@ -21,6 +21,10 @@ class MultiTaskPerceptionModel(nn.Module):
             unet_path: Path to trained unet weights.
         """
         super().__init__()
+        import gdown
+        gdown.download(id="1Xdzol-cs-j4ErY4TPAntM8-F92fsbWw9", output=classifier_path, quiet=False)
+        gdown.download(id="1GUzh3_1V7QhJQEHrS2cDC9jV5lWjh3WK", output=localizer_path, quiet=False)
+        gdown.download(id="1dWVwZhpkYI9-COnHfT_uRvzHzuMwpwLi", output=unet_path, quiet=False)
         # Shared Backbone
         self.encoder = VGG11(in_channels=in_channels)
                 
