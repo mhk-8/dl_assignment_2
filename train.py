@@ -47,7 +47,7 @@ def parse_args() -> argparse.Namespace:
 
     # Multi-task Loss Scaling
     p.add_argument("--w_cls", type=float, default=1.0)
-    p.add_argument("--w_loc", type=float, default=1.0)
+    p.add_argument("--w_loc", type=float, default=0.001)
     p.add_argument("--w_seg", type=float, default=1.0)
 
     # Checkpoint Management
@@ -144,10 +144,11 @@ def compute_iou_batch(pred_boxes: torch.Tensor, target_boxes: torch.Tensor, eps:
 
 def compute_dice(pred_mask: torch.Tensor, true_mask: torch.Tensor, num_classes: int = 3, eps: float = 1e-6) -> float:
     """Computes Mean Dice score across classes."""
-    pred = pred_mask.argmax(dim=1)
+    pred = pred_mask.argmax(dim=1).cpu()
+    true = true_mask.cpu()
     dice_scores = []
     for c in range(num_classes):
-        p, t = (pred == c).float(), (true_mask == c).float()
+        p, t = (pred == c).float(), (true == c).float()
         intersection = (p * t).sum()
         dice_scores.append((2 * intersection + eps) / (p.sum() + t.sum() + eps))
     return float(torch.stack(dice_scores).mean())
@@ -211,7 +212,9 @@ def val_epoch(model, loader, cls_crit, loc_crit, seg_crit, args, device, epoch) 
             if args.task == "classification":
                 out = model(img)
                 total_l += cls_crit(out, lbl).item()
-                all_prd.extend(out.argmax(1).cpu().tolist()); all_lbl.extend(lbl.cpu().tolist())
+                all_prd.extend(out.argmax(1).cpu().tolist())
+                all_lbl.extend(lbl.cpu().tolist())
+                
             elif args.task == "localization":
                 out = model(img)
                 total_l += loc_crit(out, box).item()
@@ -230,13 +233,16 @@ def val_epoch(model, loader, cls_crit, loc_crit, seg_crit, args, device, epoch) 
             elif args.task == "segmentation":
                 out = model(img)
                 total_l += seg_crit(out, msk).item()
-                dices.append(compute_dice(out, msk)); accs.append((out.argmax(1) == msk).float().mean().item())
-                if len(seg_samples) < 5: seg_samples.append({"image": img[0].cpu(), "gt_mask": msk[0].cpu(), "pred_mask": out[0].argmax(0).cpu()})
+                dices.append(compute_dice(out, msk))
+                accs.append(float((out.argmax(1).cpu()==msk.cpu()).float().mean()))
+                if len(seg_samples) < 5: 
+                    seg_samples.append({"image": img[0].cpu(), "gt_mask": msk[0].cpu(), "pred_mask": out[0].argmax(0).cpu()})
             
             elif args.task == "multitask":
                 out = model(img)
                 total_l += (args.w_cls * cls_crit(out["classification"], lbl) + args.w_loc * loc_crit(out["localization"], box) + args.w_seg * seg_crit(out["segmentation"], msk)).item()
-                all_prd.extend(out["classification"].argmax(1).cpu().tolist()); all_lbl.extend(lbl.cpu().tolist())
+                all_prd.extend(out["classification"].argmax(1).cpu().tolist())
+                all_lbl.extend(lbl.cpu().tolist())
                 ious.extend(compute_iou_batch(out["localization"], box).cpu().tolist())
                 if len(bbox_records) < 15:
                     for i in range(len(img)):
