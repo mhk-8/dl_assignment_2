@@ -36,7 +36,7 @@ class VGG11Localizer(nn.Module):
             
             # Output Layer: 4 coordinates [xc, yc, w, h]
             nn.Linear(512, 4),
-            
+            nn.Sigmoid() 
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

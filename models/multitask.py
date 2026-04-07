@@ -50,7 +50,7 @@ class MultiTaskPerceptionModel(nn.Module):
             nn.Linear(4096, 512),
             nn.ReLU(inplace=True),
             nn.Linear(512, 4),
-            
+            nn.Sigmoid() 
         )
 
         # Segmentation Decoder (from Task 3)
