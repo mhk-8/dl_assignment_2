@@ -94,11 +94,11 @@ class VGG11Encoder(nn.Module):
 
         if return_features:
             features = {
-                "block1": s2,  
-                "block2": s3,  
-                "block3": s4,  
-                "block4": s5,  
-                #"block5": s5,  
+                "block1": s1,  
+                "block2": s2,  
+                "block3": s3,  
+                "block4": s4,  
+                "block5": s5  
             }
             return p5, features
         

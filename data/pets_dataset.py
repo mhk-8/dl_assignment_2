@@ -174,13 +174,13 @@ class OxfordIIITPetDataset(Dataset):
         if len(bboxes) > 0:
             cx_n, cy_n, w_n, h_n = bboxes[0]
             bbox = torch.tensor([
-                cx_n ,
-                cy_n ,
-                w_n  ,
-                h_n 
+                cx_n * 224.0 ,
+                cy_n * 224.0 ,
+                w_n  * 224.0,
+                h_n * 224.0
             ], dtype=torch.float32)
         else:
-            bbox = torch.tensor([0.5, 0.5, 1.0, 1.0], dtype=torch.float32)
+            bbox = torch.tensor([112.0, 112.0, 224.0, 224.0], dtype=torch.float32)
             
         return {
             "image": image,

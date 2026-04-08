@@ -60,7 +60,7 @@ class MultiTaskPerceptionModel(nn.Module):
         self.up2 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
         self.dec2 = conv_block(128+64 , 64)
         self.up1 = nn.ConvTranspose2d(64, 32, kernel_size=2, stride=2)
-        self.dec1 = conv_block(32, 32)
+        self.dec1 = conv_block( 32 +64, 32)
         self.final_seg = nn.Conv2d(32, seg_classes, kernel_size=1)
         
         #load pretrained weights
@@ -124,14 +124,14 @@ class MultiTaskPerceptionModel(nn.Module):
         cls_out = self.cls_head(bottleneck)
 
         # Localization 
-        bbox_out = self.bbox_head(bottleneck)
+        bbox_out = self.bbox_head(bottleneck) * 224.0
 
-        # Segmentation 
-        d5 = self.dec5(torch.cat([self.up5(bottleneck), skips["block4"]], dim=1))
-        d4 = self.dec4(torch.cat([self.up4(d5), skips["block3"]], dim=1))
-        d3 = self.dec3(torch.cat([self.up3(d4), skips["block2"]], dim=1))
-        d2 = self.dec2(torch.cat([self.up2(d3), skips["block1"]], dim=1))
-        d1 = self.dec1(self.up1(d2))
+        # Forward pass using all 5 skip connections
+        d5 = self.dec5(torch.cat([self.up5(bottleneck), skips["block5"]], dim=1))
+        d4 = self.dec4(torch.cat([self.up4(d5), skips["block4"]], dim=1))
+        d3 = self.dec3(torch.cat([self.up3(d4), skips["block3"]], dim=1))
+        d2 = self.dec2(torch.cat([self.up2(d3), skips["block2"]], dim=1))
+        d1 = self.dec1(torch.cat([self.up1(d2), skips["block1"]], dim=1))
         seg_out = self.final_seg(d1)
 
         return {

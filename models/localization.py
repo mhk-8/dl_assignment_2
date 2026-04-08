@@ -52,4 +52,4 @@ class VGG11Localizer(nn.Module):
         # Pass through the regression head
         bboxes = self.regression_head(features)
         
-        return bboxes
+        return bboxes * 224.0
