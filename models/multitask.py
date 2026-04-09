@@ -22,9 +22,9 @@ class MultiTaskPerceptionModel(nn.Module):
         """
         super().__init__()
         import gdown
-        gdown.download(id="1DB83O3KYIu0TWa2FCB7unfB6ge-8-gUY", output=classifier_path, quiet=False)
-        gdown.download(id="10kmNpPlXswYe0faWasSIA9rWXxLcS-GG", output=localizer_path, quiet=False)
-        gdown.download(id="1JlzkeV8cRjSfJtnpgoDwyaiEiJHeaH0Y", output=unet_path, quiet=False)
+        gdown.download(id="1RkRrb-1o3Wl9CqvghP80pplhcCuJEivE", output=classifier_path, quiet=False)
+        gdown.download(id="1ezBINXfOJF5OEpYaB7nBbiHnZoKOjRR1", output=localizer_path, quiet=False)
+        gdown.download(id="1ZjxI1j-FS2UlgMJPAxXofuSh_TtLPn_d", output=unet_path, quiet=False)
         # Shared Backbone
         self.encoder = VGG11(in_channels=in_channels)
                 
