@@ -171,9 +171,9 @@ def train_epoch(model, loader, optimizer, cls_crit, loc_crit, seg_crit, args, de
             c_l += loss.item()
         elif task == "localization":
             pred_box = model(img)
-            mse_loss = IoULoss()(out, box)
+           # mse_loss = IoULoss()(out, box)
             iou_loss = loc_crit(pred_box, box)
-            loss = mse_loss + iou_loss
+            loss = iou_loss
             l_l += loss.item()
         elif task == "segmentation":
             loss = seg_crit(model(img), msk)
