@@ -171,7 +171,7 @@ def train_epoch(model, loader, optimizer, cls_crit, loc_crit, seg_crit, args, de
             c_l += loss.item()
         elif task == "localization":
             pred_box = model(img)
-            mse_loss = nn.MSELoss()(pred_box, box)
+            mse_loss = IoULoss()(out, box)
             iou_loss = loc_crit(pred_box, box)
             loss = mse_loss + iou_loss
             l_l += loss.item()
@@ -181,7 +181,7 @@ def train_epoch(model, loader, optimizer, cls_crit, loc_crit, seg_crit, args, de
         elif task == "multitask":
             out = model(img)
             lc = cls_crit(out["classification"], lbl)
-            ll = nn.MSELoss()(out["localization"] /224.0 , box / 224.0)
+            ll = IoULoss()(out["localization"], box)
             ls = seg_crit(out["segmentation"], msk)
             loss = (args.w_cls * lc) + (args.w_loc * ll) + (args.w_seg * ls)
             c_l, l_l, s_l = c_l + lc.item(), l_l + ll.item(), s_l + ls.item()
@@ -240,7 +240,7 @@ def val_epoch(model, loader, cls_crit, loc_crit, seg_crit, args, device, epoch) 
             
             elif args.task == "multitask":
                 out = model(img)
-                total_l += (args.w_cls * cls_crit(out["classification"], lbl) + args.w_loc * loc_crit(out["localization"] /224.0, box/224.0) + args.w_seg * seg_crit(out["segmentation"], msk)).item()
+                total_l += (args.w_cls * cls_crit(out["classification"], lbl) + args.w_loc * IoULoss()(out["localization"], box) + args.w_seg * seg_crit(out["segmentation"], msk)).item()
                 all_prd.extend(out["classification"].argmax(1).cpu().tolist())
                 all_lbl.extend(lbl.cpu().tolist())
                 ious.extend(compute_iou_batch(out["localization"], box).cpu().tolist())
