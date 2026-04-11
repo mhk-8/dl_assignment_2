@@ -171,9 +171,9 @@ def train_epoch(model, loader, optimizer, cls_crit, loc_crit, seg_crit, args, de
             c_l += loss.item()
         elif task == "localization":
             pred_box = model(img)
-            dist_loss = nn.SmoothL1Loss()(pred_box/224.0, box/224.0)
+            dist_loss = nn.SmoothL1Loss()(pred_box, box)
             iou_loss = loc_crit(pred_box, box)
-            loss = dist_loss + iou_loss
+            loss = dist_loss + (iou_loss * 5.0)
             l_l += loss.item()
         elif task == "segmentation":
             loss = seg_crit(model(img), msk)
@@ -183,7 +183,7 @@ def train_epoch(model, loader, optimizer, cls_crit, loc_crit, seg_crit, args, de
             lc = cls_crit(out["classification"], lbl)
             ll_iou = IoULoss()(out["localization"], box)
             ll_dist = nn.SmoothL1Loss()(out["localization"], box)
-            ll = ll_iou + ll_dist
+            ll = (ll_iou * 5.0) + ll_dist
             ls = seg_crit(out["segmentation"], msk)
             loss = (args.w_cls * lc) + (args.w_loc * ll) + (args.w_seg * ls)
             c_l, l_l, s_l = c_l + lc.item(), l_l + ll.item(), s_l + ls.item()
@@ -219,9 +219,9 @@ def val_epoch(model, loader, cls_crit, loc_crit, seg_crit, args, device, epoch) 
                 
             elif args.task == "localization":
                 out = model(img)
-                dist_loss = nn.SmoothL1Loss()(out/224.0, box/224.0)
+                dist_loss = nn.SmoothL1Loss()(out, box)
                 iou_loss = loc_crit(out, box)
-                loss = dist_loss + iou_loss
+                loss = dist_loss + (iou_loss * 5.0)
                 total_l += loss.item()
                 ious.extend(compute_iou_batch(out, box).cpu().tolist())
                 
