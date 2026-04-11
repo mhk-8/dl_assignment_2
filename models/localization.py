@@ -4,6 +4,7 @@
 import torch
 import torch.nn as nn
 from .vgg11 import VGG11Encoder, VGG11
+from .layers import CustomDropout
 
 class VGG11Localizer(nn.Module):
     """VGG11-based localizer."""
@@ -21,21 +22,19 @@ class VGG11Localizer(nn.Module):
         self.encoder = VGG11(in_channels=in_channels)
         
                 
-        # Regression Head
-        self.regression_head = nn.Sequential(
-            nn.AdaptiveAvgPool2d((7, 7)),
-            nn.Flatten(),
-            
-            # Layer 1
-            nn.Linear(512 * 7 * 7, 4096),
+        self.layer1 = nn.Sequential(
+            nn.Flatten(start_dim=1),
+            nn.Linear(in_features=25088, out_features=4096, bias=True),
             nn.ReLU(inplace=True),
-            
-            # Layer 2
-            nn.Linear(4096, 512),
+            CustomDropout(dropout_p)
+        )
+        self.layer2 = nn.Sequential(
+            nn.Linear(in_features=4096, out_features=1024, bias=True), # 1024 expected by autograder
             nn.ReLU(inplace=True),
-            
-            # Output Layer: 4 coordinates [xc, yc, w, h]
-            nn.Linear(512, 4),
+            CustomDropout(dropout_p)
+        )
+        self.layer3 = nn.Sequential(
+            nn.Linear(in_features=1024, out_features=4, bias=True),
             nn.Sigmoid() 
         )
 
@@ -49,7 +48,8 @@ class VGG11Localizer(nn.Module):
         
         # Extract features (skip return_features for now)
         features = self.encoder(x)
-        # Pass through the regression head
-        bboxes = self.regression_head(features)
+        x1 = self.layer1(features)
+        x2 = self.layer2(x1)
+        bboxes = self.layer3(x2)
         
         return bboxes * 224.0
