@@ -4,8 +4,8 @@
 **Roll Number:** CS25M028
 
 ## Important Links
-* [**Weights & Biases (W&B) Public Report:** ](https://wandb.ai/majjiharikrishna2002-iitm-ac-in/da6401-assignment2/reports/DA6401-Assignment-2-Report--VmlldzoxNjQ0MjkwNw?accessToken=jl922e9j3dfltiyiodopqrnprgno0kk12p2v7wntpgo14tflvg204fwz3kvfos6w)
-* [**GitHub Repository:**](https://github.com/mhk-8/dl_assignment_2)
+* **Weights & Biases (W&B) Public Report:** [Report Link](https://wandb.ai/majjiharikrishna2002-iitm-ac-in/da6401-assignment2/reports/DA6401-Assignment-2-Report--VmlldzoxNjQ0MjkwNw?accessToken=jl922e9j3dfltiyiodopqrnprgno0kk12p2v7wntpgo14tflvg204fwz3kvfos6w)
+* **GitHub Repository:**[Public Repository](https://github.com/mhk-8/dl_assignment_2)
 
 ## Project Overview
 This repository contains the implementation of a cohesive, multi-stage Visual Perception Pipeline built using PyTorch.

@@ -1,5 +1,5 @@
-"""Dataset skeleton for Oxford-IIIT Pet.
-"""
+"""Dataset skeleton for Oxford-IIIT Pet."""
+
 import os
 import torch
 import numpy as np
@@ -14,104 +14,65 @@ def get_train_transforms() -> A.Compose:
         A.Resize(224, 224),
         A.HorizontalFlip(p=0.5),
         A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, p=0.3),
-        A.Normalize(mean=[0.485, 0.456, 0.406],
-                    std=[0.229, 0.224, 0.225]),
+        A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ToTensorV2(),
-    ], bbox_params=A.BboxParams(
-        format='pascal_voc',
-        label_fields=['class_labels'],
-        clip=True,
-        min_visibility=0.1,
-    ))
-
+    ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels'], clip=True, min_visibility=0.1))
 
 def get_val_transforms() -> A.Compose:
     return A.Compose([
         A.Resize(224, 224),
-        A.Normalize(mean=[0.485, 0.456, 0.406],
-                    std=[0.229, 0.224, 0.225]),
+        A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ToTensorV2(),
-    ], bbox_params=A.BboxParams(
-        format='pascal_voc',
-        label_fields=['class_labels'],
-        clip=True,
-        min_visibility=0.1,
-    ))
+    ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels'], clip=True, min_visibility=0.1))
 
 class OxfordIIITPetDataset(Dataset):
-    """Oxford-IIIT Pet multi-task dataset loader skeleton."""
-    def __init__(self, root: str, split: str = "train", transform=None):
-        assert split in ("train", "val", "test"), \
-            f"split must be 'train', 'val', or 'test'. Got: '{split}'"
-            
-        self.root = root
+    def __init__(self, data_dir: str, split: str = "train", transforms=None):
+        super().__init__()
+        self.data_dir = data_dir
         self.split = split
+        self.images_dir = os.path.join(data_dir, "images")
+        self.trimaps_dir = os.path.join(data_dir, "annotations", "trimaps")
+        self.xmls_dir = os.path.join(data_dir, "annotations", "xmls")
         
-       
-        self.images_dir = os.path.join(root, "images")
-        self.xmls_dir   = os.path.join(root, "annotations", "xmls")
-        self.trimaps_dir= os.path.join(root, "annotations", "trimaps")
-        # Parse annotations/list.txt
-        # Format: <image_name> <CLASS-ID> <SPECIES> <BREED-ID>
-        # CLASS-ID is 1-indexed (1-37) → convert to 0-indexed 
-        ann_file = os.path.join(root, "annotations", "list.txt")
-        samples = []
-        with open(ann_file) as f:
+        self.transforms = transforms
+        if self.transforms is None:
+            self.transforms = get_train_transforms() if split == "train" else get_val_transforms()
+            
+        self.filenames = []
+        self.classes = [None] * 37 
+        self.class_to_idx = {}
+
+        list_txt_path = os.path.join(data_dir, "annotations", "list.txt")
+        with open(list_txt_path, 'r') as f:
             for line in f:
-                if line.startswith("#"):
-                    continue
+                if line.startswith('#'): continue
                 parts = line.strip().split()
-                if len(parts) < 2:
-                    continue
-                img_name = parts[0]
-                class_id = int(parts[1]) - 1    # ← parts[1] = CLASS-ID (not SPECIES)
-                samples.append((img_name, class_id))
-        
-        # Perform Random Split (e.g., 80/20 for Train/Val)
-        # Requirement: Proper and random split isolation 
-        rng = np.random.default_rng(42)
-        indices = np.arange(len(samples))
-        rng.shuffle(indices)
+                if len(parts) >= 2:
+                    filename = parts[0]
+                    if filename.startswith(".") or filename.startswith("mat"): continue
+                    
+                    class_id = int(parts[1]) - 1
+                    breed_name = "_".join(filename.split("_")[:-1])
+                    self.classes[class_id] = breed_name
+                    self.class_to_idx[breed_name] = class_id
+                    self.filenames.append(filename)
 
-        n = len(indices)
-        n_train = int(0.8 * n)
-        n_val   = int(0.1 * n)
+    def __len__(self):
+        return len(self.filenames)
 
-        if split == "train":
-            chosen = indices[:n_train]
-        elif split == "val":
-            chosen = indices[n_train:n_train + n_val]
-        else:  # test
-            chosen = indices[n_train + n_val:]
-        self.samples = [samples[i] for i in chosen]
-        
-        if transform is not None:
-            self.transform = transform
-        elif split == "train":
-            self.transform = get_train_transforms()
-        else:
-            self.transform = get_val_transforms()
-        
-
-    def __len__(self) -> int:
-        return len(self.samples)
-
-    def _parse_xml(self, xml_path:str, img_w: int, img_h: int):
-        """Parse Pascal VOC XML to get [xmin, ymin, xmax, ymax]."""
-        tree   = ET.parse(xml_path)
-        root   = tree.getroot()
-        obj    = root.find("object")
+    def _parse_xml(self, xml_path: str, img_w: int, img_h: int):
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+        obj = root.find("object")
         if obj is None: return [0.0, 0.0, float(img_w), float(img_h)]
         bndbox = obj.find("bndbox")
         if bndbox is None: return [0.0, 0.0, float(img_w), float(img_h)]
         
-        # Get raw pixel coords from XML
-        xmin = float(bndbox.find("xmin").text) 
-        ymin = float(bndbox.find("ymin").text) 
+        xmin = float(bndbox.find("xmin").text)
+        ymin = float(bndbox.find("ymin").text)
         xmax = float(bndbox.find("xmax").text)
-        ymax = float(bndbox.find("ymax").text) 
+        ymax = float(bndbox.find("ymax").text)
         
-        # Scale to 224×224 target size
         xmin = max(0.0, xmin)
         ymin = max(0.0, ymin)
         xmax = min(float(img_w), xmax)
@@ -120,35 +81,32 @@ class OxfordIIITPetDataset(Dataset):
         if xmax <= xmin: xmax = xmin + 1.0
         if ymax <= ymin: ymax = ymin + 1.0
             
-        return [xmin, ymin, xmax, ymax]
+        return [xmin, ymin, xmax, ymax] 
 
-    def __getitem__(self, idx) -> dict:
-        img_name, class_id = self.samples[idx]
+    def __getitem__(self, idx):
+        filename = self.filenames[idx]
+        img_path = os.path.join(self.images_dir, f"{filename}.jpg")
         
-        # Load Image
-        img_path = os.path.join(self.images_dir, f"{img_name}.jpg")
-        if not os.path.exists(img_path):
-            img_path = os.path.join(self.images_dir, f"{img_name}.png")
-        image  = np.array(Image.open(img_path).convert("RGB"))
-        img_h, img_w = image.shape[:2]
-        
-        # Load Trimap Mask
-        mask_path = os.path.join(self.trimaps_dir, f"{img_name}.png")
+        img = np.array(Image.open(img_path).convert("RGB"))
+        img_h, img_w = img.shape[:2]
+
+        mask_path = os.path.join(self.trimaps_dir, f"{filename}.png")
         mask = np.array(Image.open(mask_path))
-        mask = np.where(mask == 1, 0, np.where(mask == 2, 1, 2)).astype(np.uint8) 
+        mask = np.where(mask == 1, 0, np.where(mask == 2, 1, 2)).astype(np.uint8)
+
+        xml_path = os.path.join(self.xmls_dir, f"{filename}.xml")
+        bbox_pascal = self._parse_xml(xml_path, img_w, img_h) if os.path.exists(xml_path) else [0.0, 0.0, float(img_w), float(img_h)]
         
-        # Load Bounding Box [xmin, ymin, xmax, ymax]
-        xml_path = os.path.join(self.xmls_dir, f"{img_name}.xml")
-        bbox_pascal = (self._parse_xml(xml_path, img_w, img_h)
-                 if os.path.exists(xml_path)
-                 else [0.0, 0.0, float(img_w), float(img_h)])
-        
-        augmented = self.transform(image=image, mask=mask, bboxes=[bbox_pascal], class_labels=[class_id])
+        breed_name = "_".join(filename.split("_")[:-1])
+        label_idx = self.class_to_idx[breed_name]
+
+        augmented = self.transforms(image=img, mask=mask, bboxes=[bbox_pascal], class_labels=[label_idx])
         image = augmented["image"]                      
         mask = augmented["mask"].long()                       
         bboxes = augmented["bboxes"]
         
-        # After augmentation, convert albumentations normalized output → pixels
+        # Albumentations outputs pascal_voc here because we told it to.
+        # Now we manually convert it to [cx, cy, w, h] pixel coordinates.
         if len(bboxes) > 0:
             xmin, ymin, xmax, ymax = bboxes[0]
             cx = (xmin + xmax) / 2.0
@@ -158,5 +116,5 @@ class OxfordIIITPetDataset(Dataset):
             bbox = torch.tensor([cx, cy, w, h], dtype=torch.float32)
         else:
             bbox = torch.tensor([112.0, 112.0, 224.0, 224.0], dtype=torch.float32)
-            
-        return {"image": image, "label": torch.tensor(class_id, dtype=torch.long), "bbox": bbox, "mask": mask}
+
+        return {"image": image, "label": torch.tensor(label_idx, dtype=torch.long), "bbox": bbox, "mask": mask}

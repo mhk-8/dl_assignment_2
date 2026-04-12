@@ -52,4 +52,4 @@ class VGG11Localizer(nn.Module):
         x2 = self.layer2(x1)
         bboxes = self.layer3(x2)
         
-        return bboxes * 224.0
+        return bboxes
