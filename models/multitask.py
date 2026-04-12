@@ -43,18 +43,19 @@ class MultiTaskPerceptionModel(nn.Module):
 
         # Localization Head 
         self.loc_layer1 = nn.Sequential(
+            nn.AdaptiveAvgPool2d((7, 7)),
             nn.Flatten(start_dim=1),
-            nn.Linear(in_features=25088, out_features=4096, bias=True),
+            nn.Linear(25088, 4096, bias=True),
             nn.ReLU(inplace=True),
             CustomDropout(p=0.5)
         )
         self.loc_layer2 = nn.Sequential(
-            nn.Linear(in_features=4096, out_features=1024, bias=True),
+            nn.Linear(4096, 1024, bias=True),
             nn.ReLU(inplace=True),
             CustomDropout(p=0.5)
         )
         self.loc_layer3 = nn.Sequential(
-            nn.Linear(in_features=1024, out_features=4, bias=True),
+            nn.Linear(1024, 4, bias=True),
             nn.Sigmoid()
         )
 
@@ -103,8 +104,9 @@ class MultiTaskPerceptionModel(nn.Module):
         sd = self._get_sd(path, device)
         if sd is None:
             return
-        bbox_sd = {k.replace("layer", "loc_layer"): v for k, v in sd.items() if not k.startswith("encoder.")}
-        self.load_state_dict(bbox_sd, strict=False)
+        loc_sd = {k.replace("layer", "loc_layer"): v
+                for k, v in sd.items() if not k.startswith("encoder.")}
+        self.load_state_dict(loc_sd, strict=False)
 
     def _load_unet(self, path: str, device):
         sd = self._get_sd(path, device)
@@ -132,9 +134,9 @@ class MultiTaskPerceptionModel(nn.Module):
         cls_out = self.cls_head(bottleneck)
 
         # Localization 
-        x1 = self.loc_layer1(bottleneck)
-        x2 = self.loc_layer2(x1)
-        bbox_out = self.loc_layer3(x2) * 224.0
+        lx1 = self.loc_layer1(bottleneck)
+        lx2 = self.loc_layer2(lx1)
+        bbox_out = self.loc_layer3(lx2) * 224.0 
 
         # Forward pass using all 5 skip connections
         d5 = self.dec5(torch.cat([self.up5(bottleneck), skips["block5"]], dim=1))

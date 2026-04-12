@@ -23,19 +23,20 @@ class VGG11Localizer(nn.Module):
         
                 
         self.layer1 = nn.Sequential(
+            nn.AdaptiveAvgPool2d((7, 7)),
             nn.Flatten(start_dim=1),
-            nn.Linear(in_features=25088, out_features=4096, bias=True),
+            nn.Linear(25088, 4096, bias=True),
             nn.ReLU(inplace=True),
             CustomDropout(dropout_p)
         )
         self.layer2 = nn.Sequential(
-            nn.Linear(in_features=4096, out_features=1024, bias=True), # 1024 expected by autograder
+            nn.Linear(4096, 1024, bias=True),
             nn.ReLU(inplace=True),
             CustomDropout(dropout_p)
         )
         self.layer3 = nn.Sequential(
-            nn.Linear(in_features=1024, out_features=4, bias=True),
-            nn.Sigmoid() 
+            nn.Linear(1024, 4, bias=True),
+            nn.Sigmoid()
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -50,6 +51,6 @@ class VGG11Localizer(nn.Module):
         features = self.encoder(x)
         x1 = self.layer1(features)
         x2 = self.layer2(x1)
-        bboxes = self.layer3(x2)
+        bboxes = self.layer3(x2) * 224.0
         
         return bboxes

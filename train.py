@@ -173,7 +173,7 @@ def train_epoch(model, loader, optimizer, cls_crit, loc_crit, seg_crit, args, de
             pred_box = model(img)
             dist_loss = nn.SmoothL1Loss()(pred_box, box)
             iou_loss = loc_crit(pred_box, box)
-            loss = dist_loss + (iou_loss * 5.0)
+            loss = dist_loss + iou_loss
             l_l += loss.item()
         elif task == "segmentation":
             loss = seg_crit(model(img), msk)
@@ -181,9 +181,9 @@ def train_epoch(model, loader, optimizer, cls_crit, loc_crit, seg_crit, args, de
         elif task == "multitask":
             out = model(img)
             lc = cls_crit(out["classification"], lbl)
-            ll_iou = IoULoss()(out["localization"], box)
+            ll_iou = loc_crit(out["localization"], box)
             ll_dist = nn.SmoothL1Loss()(out["localization"], box)
-            ll = (ll_iou * 5.0) + ll_dist
+            ll = ll_iou + ll_dist
             ls = seg_crit(out["segmentation"], msk)
             loss = (args.w_cls * lc) + (args.w_loc * ll) + (args.w_seg * ls)
             c_l, l_l, s_l = c_l + lc.item(), l_l + ll.item(), s_l + ls.item()

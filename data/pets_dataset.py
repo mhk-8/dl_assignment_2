@@ -64,22 +64,16 @@ class OxfordIIITPetDataset(Dataset):
         tree = ET.parse(xml_path)
         root = tree.getroot()
         obj = root.find("object")
-        if obj is None: return [0.0, 0.0, float(img_w), float(img_h)]
+        if obj is None: 
+            return [0.0, 0.0, float(img_w), float(img_h)]
         bndbox = obj.find("bndbox")
-        if bndbox is None: return [0.0, 0.0, float(img_w), float(img_h)]
+        if bndbox is None: 
+            return [0.0, 0.0, float(img_w), float(img_h)]
         
         xmin = float(bndbox.find("xmin").text)
         ymin = float(bndbox.find("ymin").text)
         xmax = float(bndbox.find("xmax").text)
         ymax = float(bndbox.find("ymax").text)
-        
-        xmin = max(0.0, xmin)
-        ymin = max(0.0, ymin)
-        xmax = min(float(img_w), xmax)
-        ymax = min(float(img_h), ymax)
-        
-        if xmax <= xmin: xmax = xmin + 1.0
-        if ymax <= ymin: ymax = ymin + 1.0
             
         return [xmin, ymin, xmax, ymax] 
 
@@ -95,8 +89,11 @@ class OxfordIIITPetDataset(Dataset):
         mask = np.where(mask == 1, 0, np.where(mask == 2, 1, 2)).astype(np.uint8)
 
         xml_path = os.path.join(self.xmls_dir, f"{filename}.xml")
-        bbox_pascal = self._parse_xml(xml_path, img_w, img_h) if os.path.exists(xml_path) else [0.0, 0.0, float(img_w), float(img_h)]
-        
+        if os.path.exists(xml_path):
+            bbox_pascal = self._parse_xml(xml_path, img_w, img_h)
+        else:
+            bbox_pascal = [0, 0, img_w, img_h]
+            
         breed_name = "_".join(filename.split("_")[:-1])
         label_idx = self.class_to_idx[breed_name]
 
@@ -109,12 +106,13 @@ class OxfordIIITPetDataset(Dataset):
         # Now we manually convert it to [cx, cy, w, h] pixel coordinates.
         if len(bboxes) > 0:
             xmin, ymin, xmax, ymax = bboxes[0]
-            cx = (xmin + xmax) / 2.0
-            cy = (ymin + ymax) / 2.0
-            w = xmax - xmin
-            h = ymax - ymin
-            bbox = torch.tensor([cx, cy, w, h], dtype=torch.float32)
+            bbox = torch.tensor([
+                (xmin + xmax) / 2.0,   # cx
+                (ymin + ymax) / 2.0,   # cy
+                xmax - xmin,            # w
+                ymax - ymin,            # h
+            ], dtype=torch.float32)
         else:
             bbox = torch.tensor([112.0, 112.0, 224.0, 224.0], dtype=torch.float32)
-
+            
         return {"image": image, "label": torch.tensor(label_idx, dtype=torch.long), "bbox": bbox, "mask": mask}
