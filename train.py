@@ -170,10 +170,17 @@ def train_epoch(model, loader, optimizer, cls_crit, loc_crit, seg_crit, args, de
             loss = cls_crit(model(img), lbl)
             c_l += loss.item()
         elif task == "localization":
-            pred_box = model(img)
-            dist_loss = nn.SmoothL1Loss()(pred_box, box)
-            iou_loss = loc_crit(pred_box, box)
-            loss = dist_loss + iou_loss
+            valid_mask = batch["has_bbox"].to(device)
+            
+            if not valid_mask.any():
+                continue
+            
+            pred_box = model(img)[valid_mask]
+            valid_box = box[valid_mask]
+            
+            dist_loss = nn.SmoothL1Loss()(pred_box, valid_box)
+            iou_loss = loc_crit(pred_box, valid_box)
+            loss = dist_loss + (iou_loss * 5.0)
             l_l += loss.item()
         elif task == "segmentation":
             loss = seg_crit(model(img), msk)
@@ -218,12 +225,12 @@ def val_epoch(model, loader, cls_crit, loc_crit, seg_crit, args, device, epoch) 
                 all_lbl.extend(lbl.cpu().tolist())
                 
             elif args.task == "localization":
-                out = model(img)
-                dist_loss = nn.SmoothL1Loss()(out, box)
-                iou_loss = loc_crit(out, box)
+                pred_box = model(img)
+                dist_loss = nn.SmoothL1Loss()(pred_box, box)
+                iou_loss = loc_crit(pred_box, box)
                 loss = dist_loss + (iou_loss * 5.0)
                 total_l += loss.item()
-                ious.extend(compute_iou_batch(out, box).cpu().tolist())
+                ious.extend(compute_iou_batch(pred_box, box).cpu().tolist())
                 
                 if len(bbox_records) < 15:
                     for i in range(len(img)):
@@ -231,8 +238,8 @@ def val_epoch(model, loader, cls_crit, loc_crit, seg_crit, args, device, epoch) 
                         bbox_records.append({
                             "image":    img[i].cpu(),
                             "gt_box":   box[i].cpu().numpy(),
-                            "pred_box": out[i].cpu().numpy(),
-                            "iou": float(compute_iou_batch( out[i:i+1], box[i:i+1]).item())
+                            "pred_box": pred_box[i].cpu().numpy(),
+                            "iou": float(compute_iou_batch( pred_box[i:i+1], box[i:i+1]).item())
                         })
                         
             elif args.task == "segmentation":

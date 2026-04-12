@@ -89,10 +89,13 @@ class OxfordIIITPetDataset(Dataset):
         mask = np.where(mask == 1, 0, np.where(mask == 2, 1, 2)).astype(np.uint8)
 
         xml_path = os.path.join(self.xmls_dir, f"{filename}.xml")
-        if os.path.exists(xml_path):
-            bbox_pascal = self._parse_xml(xml_path, img_w, img_h)
+        has_bbox = os.path.exists(xml_path)
+        if has_bbox:
+                bbox_pascal = self._parse_xml(xml_path, img_w, img_h)
         else:
-            bbox_pascal = [0, 0, img_w, img_h]
+                bbox_pascal = [0, 0, img_w, img_h]
+        
+        
             
         breed_name = "_".join(filename.split("_")[:-1])
         label_idx = self.class_to_idx[breed_name]
@@ -115,4 +118,4 @@ class OxfordIIITPetDataset(Dataset):
         else:
             bbox = torch.tensor([112.0, 112.0, 224.0, 224.0], dtype=torch.float32)
             
-        return {"image": image, "label": torch.tensor(label_idx, dtype=torch.long), "bbox": bbox, "mask": mask}
+        return {"image": image, "label": torch.tensor(label_idx, dtype=torch.long), "bbox": bbox, "mask": mask, "has_bbox": has_bbox}
